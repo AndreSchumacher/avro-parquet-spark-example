@@ -14,8 +14,21 @@ project for showing how to integrate Avro and Parquet with Spark._
 
 Building the example
 --------------------
-TODO: add
 
+```
+$ git clone https://github.com/apache/spark.git
+$ cd spark
+$ git pull https://github.com/AndreSchumacher/spark.git nested_parquet
+$ sbt/sbt clean publish-local
+```
+
+Then in a different directory
+
+```
+$ git clone https://github.com/AndreSchumacher/avro-parquet-spark-example.git
+$ cd avro-parquet-spark-example
+$ mvn package
+```
 
 Other dependencies
 ------------------
