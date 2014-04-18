@@ -19,11 +19,13 @@ package avrotest
 
 import java.io.File
 
+import scala.util.Random
+
 import org.apache.hadoop.fs.Path
 
 import org.apache.avro.file.{DataFileReader, DataFileWriter}
 import org.apache.avro.mapred.FsInput
-import org.apache.avro.specific.{SpecificDatumReader, SpecificDatumWriter}
+import org.apache.avro.specific.{SpecificRecord, SpecificDatumReader, SpecificDatumWriter}
 
 import parquet.avro.AvroParquetWriter
 
@@ -31,24 +33,28 @@ import org.apache.spark.SparkContext._
 import org.apache.spark.sql.SQLContext
 import org.apache.hadoop.conf.Configuration
 import org.apache.spark.sql.catalyst.expressions.Row
+import org.apache.avro.generic.{GenericDatumReader, IndexedRecord}
+import org.apache.avro.Schema
 
 // our own class generated from user.avdl by Avro tools
-import avrotest.avro.User
+import avrotest.avro.{Message, User}
 
 // Implicits
 import collection.JavaConversions._
 
 object UserOperations {
 
+  var random: Random = new Random(15485863l)
+
   /**
    * For the given username, find the favorite number of the user.
    *
    * @param name User name
    * @param sqc The SQLContext to use
-   * @return The favorite number
+   * @return The user's age
    */
-  def findFavoriteNumberOfUser(name: String, sqc: SQLContext): Int = {
-    sqc.sql("SELECT favorite_number FROM UserTable WHERE name = \"" + name + "\"")
+  def findAgeOfUser(name: String, sqc: SQLContext): Int = {
+    sqc.sql("SELECT age FROM UserTable WHERE name = \"" + name + "\"")
       .collect()
       .apply(0)
       .apply(0)
@@ -82,73 +88,102 @@ object UserOperations {
     val colorCounts = sqc.sql("SELECT favorite_color, COUNT(name) FROM UserTable GROUP BY favorite_color")
       .collect()
     for(row <- colorCounts) {
-      result += row(0).asInstanceOf[String] -> row(1).asInstanceOf[Int]
+      result += row.getString(0) -> row.getInt(1)
     }
     result.toMap
   }
 
   /**
-   * For every user find the user(s) that have that particular user at the head
-   * of their friends list.
+   * For each user in the UserTable find the number of messages sent in the
+   * MessageTable.
    *
    * @param sqc The SQLContext to use
-   * @return A list of pairs `(a, b)`, which means that `b` has `a` as her/his best
-   *         friend
+   * @return A list of pairs (user name, number of messages sent by that user)
    */
-  def findInverseBestFriend(sqc: SQLContext): Seq[(String, String)] = {
-    sqc.sql("SELECT name, friends FROM UserTable")
-      .registerAsTable("UserFriends")
-    sqc.sql("SELECT UserTable.name, UserFriends.name FROM UserTable JOIN UserFriends ON UserTable.name = UserFriends.friends[0]")
-      .collect()
-      .map(row => (row(0).asInstanceOf[String], row(1).asInstanceOf[String]))
+  def findNumberOfMessagesSent(sqc: SQLContext): Seq[(String, Int)] = {
+   sqc.sql("""
+        SELECT name, COUNT(recipient) FROM
+          UserTable JOIN MessageTable ON UserTable.name = MessageTable.sender
+            GROUP BY name ORDER BY name""")
+     .collect()
+     .map(row => (row.getString(0), row.getInt(1)))
   }
 
   /**
-   * For every user count the number of times it appears on some other
-   * user's friend list.
+   * Find all pairs of users from the MessageTable that have mutually exchanged
+   * messages. Note: this may report duplicate pairs (User1, User2) and (User2, User1).
    *
    * @param sqc The SQLContext to use
-   * @return A list of (userName, count) pairs
+   * @return A list of pairs (user name, user name)
    */
-  def findNumberOfFriendshipCircles(sqc: SQLContext): Seq[(String, Int)] = {
-    sqc.sql("SELECT friends FROM UserTable")
-      .flatMap(row => row(0).asInstanceOf[Row].seq)
-      .groupBy(_.asInstanceOf[String])
-      .map(pair => (pair._1, pair._2.size))
-      .sortByKey()
+  def findMutualMessageExchanges(sqc: SQLContext): Seq[(String, String)] = {
+    sqc.sql("""
+        SELECT DISTINCT A.sender, B.sender FROM
+          (SELECT sender, recipient FROM MessageTable) A
+        JOIN
+          (SELECT sender, recipient FROM MessageTable) B
+        ON A.recipient = B.sender AND A.sender = B.recipient""")
       .collect()
+      .map(row => (row.getString(0), row.getString(1)))
   }
 
   /**
-   * Generates a set of users and writes their Avro objects to an Avro file.
+   * Counter the number of occurences of each word contained in a message in
+   * the MessageTable and returns the result as a word->count Map.
+   * 
+   * @param sqc he SQLContext to use
+   * @return A Map that has the words as key and the count as value
+   */
+  def countWordsInMessages(sqc: SQLContext): Map[String, Int] = {
+    sqc.sql("SELECT content from MessageTable")
+      .flatMap(row =>
+        row.getString(0).replace(",", "").split(" "))
+      .map(word => (word, 1))
+      .reduceByKey(_ + _)
+      .collect()
+      .toMap
+  }
+
+  /**
+   * Generates a of Avro objects and stores them inside an Avro file.
    *
    * @param file The output file
-   * @param numberOfUsers The number of users to generate
+   * @param factoryMethod The function to call to actually create the objects
+   * @param count The number of objects to generate
    */
-  def writeAvroUsersFile(file: File, numberOfUsers: Int): Unit = {
-    val userDatumWriter = new SpecificDatumWriter[User](classOf[User])
-    val dataFileWriter = new DataFileWriter[User](userDatumWriter)
-    dataFileWriter.create(User.getClassSchema, file)
+  def writeAvroFile[T <: SpecificRecord](
+      file: File,
+      factoryMethod: Int => T,
+      count: Int): Unit = {
+    val prototype = factoryMethod(0)
+    val datumWriter = new SpecificDatumWriter[T](
+      prototype.getClass.asInstanceOf[java.lang.Class[T]])
+    val dataFileWriter = new DataFileWriter[T](datumWriter)
 
-    for(i <- 1 to numberOfUsers) {
-      dataFileWriter.append(createUser(i))
+    dataFileWriter.create(prototype.getSchema, file)
+    for(i <- 1 to count) {
+      dataFileWriter.append(factoryMethod(i))
     }
-
     dataFileWriter.close()
   }
 
   /**
-   * Converts an Avro file that contains a set of users to a Parquet file.
+   * Converts an Avro file that contains a set of Avro objects to a Parquet file.
    *
    * @param input The Avro file to convert
    * @param output The output file (possibly on HDFS)
+   * @param schema The Avro schema of the input file
    * @param conf A Hadoop `Configuration` to use
    */
-  def convertAvroToParquetAvroUserFile(input: Path, output: Path, conf: Configuration): Unit = {
+  def convertAvroToParquetAvroFile(
+      input: Path,
+      output: Path,
+      schema: Schema,
+      conf: Configuration): Unit = {
     val fsInput = new FsInput(input, conf)
-    val reader =  new SpecificDatumReader[User](classOf[User])
+    val reader =  new GenericDatumReader[IndexedRecord](schema)
     val dataFileReader = DataFileReader.openReader(fsInput, reader)
-    val parquetWriter = new AvroParquetWriter[User](output, User.getClassSchema)
+    val parquetWriter = new AvroParquetWriter[IndexedRecord](output, schema)
 
     while(dataFileReader.hasNext)  {
       // Mote: the writer does not copy the passed object and buffers
@@ -162,7 +197,7 @@ object UserOperations {
   }
 
   /**
-   * Creates a user Avro object.
+   * Creates a User Avro object.
    *
    * @param id The ID of the user to generate
    * @return An Avro object that represents the user
@@ -170,8 +205,7 @@ object UserOperations {
   def createUser(id: Int): User = {
     val builder = User.newBuilder()
       .setName(s"User$id")
-      .setFavoriteNumber(id)
-      .setFriends(List(s"User${id+1}", s"User${id+2}", s"User${id+3}"))
+      .setAge(id / 10)
     if (id >= 5) {
       builder
         .setFavoriteColor("blue")
@@ -181,5 +215,24 @@ object UserOperations {
         .setFavoriteColor("red")
         .build()
     }
+  }
+
+  /**
+   * Creates a Message Avro object.
+   *
+   * @param id The ID of the message to generate
+   * @return an Avro object that represents the mssage
+   */
+  def createMessage(maxUserId: Int)(id: Int): Message = {
+    val sender = random.nextInt(maxUserId)
+    var recipient = random.nextInt(maxUserId)
+    while (recipient == sender) recipient = random.nextInt(maxUserId)
+
+    Message.newBuilder()
+      .setID(id)
+      .setSender(s"User$sender")
+      .setRecipient(s"User$recipient")
+      .setContent(s"Hey there, User$recipient, this is me, User$sender")
+      .build()
   }
 }

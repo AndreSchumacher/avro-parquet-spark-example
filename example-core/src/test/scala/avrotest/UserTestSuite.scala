@@ -29,6 +29,8 @@ import org.apache.spark.sql.SQLContext
 import org.apache.spark.sql.catalyst.util._
 
 import avrotest.UserOperations._
+import avrotest.avro.{Message, User}
+import scala.util.Random
 
 // inspired by [[org.apache.spark.LocalSparkContext]]
 class UserTestSuite extends FunSuite with BeforeAndAfterEach {
@@ -43,21 +45,34 @@ class UserTestSuite extends FunSuite with BeforeAndAfterEach {
         .setAppName("test")
     sqc = new SQLContext(new SparkContext(conf))
 
-    // Prepare some input data
-    val avroFile = getTempFilePath("users", ".avro")
-    val parquetFile = new Path(Files.createTempDir().toString, "users.parquet")
-    // Generate some input (10 users) and write it as an Avro file to the local
+    UserOperations.random = new Random(15485863l)
+
+    val avroFiles = (getTempFilePath("users", ".avro"), getTempFilePath("messages", ".avro"))
+    val parquetFiles = (
+      new Path(Files.createTempDir().toString, "users.parquet"),
+      new Path(Files.createTempDir().toString, "messages.parquet"))
+
+    // Generate some input (100 users, 1000 messages) and write it as an Avro file to the local
     // file system
-    writeAvroUsersFile(avroFile, 10)
+    writeAvroFile(avroFiles._1, createUser, 100)
+    writeAvroFile(avroFiles._2, createMessage(100)_, 1000)
     // Now convert the Avro file to a Parquet file (we could have generated one right away)
-    convertAvroToParquetAvroUserFile(
-      new Path(avroFile.toString),
-      new Path(parquetFile.toString),
+    convertAvroToParquetAvroFile(
+      new Path(avroFiles._1.toString),
+      new Path(parquetFiles._1.toString),
+      User.getClassSchema,
+      sqc.sparkContext.hadoopConfiguration)
+    convertAvroToParquetAvroFile(
+      new Path(avroFiles._2.toString),
+      new Path(parquetFiles._2.toString),
+      Message.getClassSchema,
       sqc.sparkContext.hadoopConfiguration)
 
-    // Import the Parquet file we just generated and register it as a table
-    val schemaRdd = sqc.parquetFile(parquetFile.getParent.toString)
-    schemaRdd.registerAsTable("UserTable")
+    // Import the Parquet files we just generated and register them as tables
+    sqc.parquetFile(parquetFiles._1.getParent.toString)
+      .registerAsTable("UserTable")
+    sqc.parquetFile(parquetFiles._2.getParent.toString)
+      .registerAsTable("MessageTable")
   }
 
   override def afterEach() {
@@ -76,25 +91,34 @@ class UserTestSuite extends FunSuite with BeforeAndAfterEach {
     assert(findFavoriteColorOfUser("User1", sqc) === "red")
   }
 
-  test("Favorite number") {
-    assert(findFavoriteNumberOfUser("User7", sqc) === 7)
+  test("Age") {
+    assert(findAgeOfUser("User20", sqc) === 2)
   }
 
   test("Color distribution") {
-    assert(findColorDistribution(sqc).apply("blue") === 6)
+    assert(findColorDistribution(sqc).apply("red") === 4)
   }
 
-  test("Best friend") {
-    val friends = findInverseBestFriend(sqc).sorted
-    assert(friends(0)._1 === "User10")
-    assert(friends(0)._2 === "User9")
-    assert(friends(1)._1 === "User2")
-    assert(friends(1)._2 === "User1")
+  // Note: this test could fail because of a different random generator implementation
+  // although the seed is fixed
+  test("Number of messages") {
+    val tmp = findNumberOfMessagesSent(sqc)
+    assert(tmp(0)._1 === "User1")
+    assert(tmp(0)._2 === 12)
   }
 
-  test("Buddy list") {
-    val friendCount = findNumberOfFriendshipCircles(sqc)
-    assert(friendCount(0)._1 === "User10")
-    assert(friendCount(0)._2 === 3)
+  // Note: this test could fail because of a different random generator implementation
+  // although the seed is fixed
+  test("Mutual message exchange") {
+    val finder = findMutualMessageExchanges(sqc)
+      .find {
+        case (user1: String, user2: String) => user1 == "User0" && user2 == "User43"
+      }
+    assert(finder.isDefined)
+  }
+
+  test("Count words in messages") {
+    val tmp = countWordsInMessages(sqc)
+    assert(tmp("Hey") === 1000)
   }
 }

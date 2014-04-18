@@ -27,6 +27,8 @@ import org.apache.spark.sql.SQLContext
 import org.apache.spark.sql.catalyst.util.getTempFilePath
 
 import avrotest.UserOperations._
+import avrotest.avro.User
+import avrotest.avro.Message
 
 object ParquetAvroSparkExample {
 
@@ -48,24 +50,36 @@ object ParquetAvroSparkExample {
     sqc = new SQLContext(new SparkContext(conf))
 
     // Prepare some input data
-    val avroFile = getTempFilePath("users", ".avro")
-    val parquetFile = new Path(Files.createTempDir().toString, "users.parquet")
-    // Generate some input (10 users) and write it as an Avro file to the local
+    val avroFiles = (getTempFilePath("users", ".avro"), getTempFilePath("messages", ".avro"))
+    val parquetFiles = (
+      new Path(Files.createTempDir().toString, "users.parquet"),
+      new Path(Files.createTempDir().toString, "messages.parquet"))
+
+    // Generate some input (100 users, 1000 messages) and write then as Avro files to the local
     // file system
-    writeAvroUsersFile(avroFile, 10)
+    writeAvroFile(avroFiles._1, createUser, 100)
+    writeAvroFile(avroFiles._2, createMessage(100)_, 1000)
     // Now convert the Avro file to a Parquet file (we could have generated one right away)
-    convertAvroToParquetAvroUserFile(
-      new Path(avroFile.toString),
-      new Path(parquetFile.toString),
+    convertAvroToParquetAvroFile(
+      new Path(avroFiles._1.toString),
+      new Path(parquetFiles._1.toString),
+      User.getClassSchema,
+      sqc.sparkContext.hadoopConfiguration)
+    convertAvroToParquetAvroFile(
+      new Path(avroFiles._2.toString),
+      new Path(parquetFiles._2.toString),
+      Message.getClassSchema,
       sqc.sparkContext.hadoopConfiguration)
 
-    // Import the Parquet file we just generated and register it as a table
-    val schemaRdd = sqc.parquetFile(parquetFile.getParent.toString)
-    schemaRdd.registerAsTable("UserTable")
+    // Import the Parquet files we just generated and register them as tables
+    sqc.parquetFile(parquetFiles._1.getParent.toString)
+      .registerAsTable("UserTable")
+    sqc.parquetFile(parquetFiles._2.getParent.toString)
+      .registerAsTable("MessageTable")
 
     // Now let's do some queries
-    println("The favorite number of User3:")
-    println(findFavoriteNumberOfUser("User3", sqc))
+    println("The age of User3:")
+    println(findAgeOfUser("User3", sqc))
     println("The favorite color of User4:")
     println(findFavoriteColorOfUser("User4", sqc))
     println("Favorite color distribution:")
@@ -73,11 +87,15 @@ object ParquetAvroSparkExample {
     for (color <- result.keys) {
       println(s"color: $color count: ${result.apply(color)}")
     }
-    findInverseBestFriend(sqc).foreach {
-      case (friend, user) => println(s"$friend is the best friend of user $user")
+    findNumberOfMessagesSent(sqc).foreach {
+      case (sender, messages) => println(s"$sender sent $messages messages")
     }
-    findNumberOfFriendshipCircles(sqc).foreach {
-      case (friend, number) => println(s"$friend appears on $number buddy lists")
+    findMutualMessageExchanges(sqc).foreach {
+      case (user_a, user_b) => println(s"$user_a and $user_b mutually exchanged messages")
+    }
+    println("Count words in messages:")
+    countWordsInMessages(sqc).toTraversable.foreach {
+      case (word, count) => println(s"word: $word count: $count")
     }
   }
 
