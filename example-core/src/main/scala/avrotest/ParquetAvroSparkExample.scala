@@ -23,12 +23,13 @@ import org.apache.hadoop.fs.Path
 
 import org.apache.spark.SparkConf
 import org.apache.spark.SparkContext
+import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.SQLContext
 import org.apache.spark.sql.catalyst.util.getTempFilePath
 
+// our own classes generated from user.avdl by Avro tools
+import avrotest.avro.{Message, User}
 import avrotest.UserOperations._
-import avrotest.avro.User
-import avrotest.avro.Message
 
 object ParquetAvroSparkExample {
 
@@ -39,12 +40,6 @@ object ParquetAvroSparkExample {
     val conf = new SparkConf(true)
       .setMaster("local")
       .setAppName("ParquetAvroExample")
-
-    // Register Kryo serializers
-    // Note: this is only required if we would like to use User objects
-    // inside Spark's MapReduce operations. For Spark SQL this is not
-    // required.
-    setKryoProperties()
 
     // Create a Spark Context and wrap it inside a SQLContext
     sqc = new SQLContext(new SparkContext(conf))
@@ -97,6 +92,23 @@ object ParquetAvroSparkExample {
     countWordsInMessages(sqc).toTraversable.foreach {
       case (word, count) => println(s"word: $word count: $count")
     }
+
+    // Stop the SparkContext
+    sqc.sparkContext.stop()
+
+    // What follows is an example of how to use Avro objects inside Spark directly. For that we
+    // need to register a few Kryo serializers. Note: this is only required if we would like to
+    // use User objects inside Spark's MapReduce operations. For Spark SQL this is not required
+    // and in fact it seems to mess up the Parquet Row serialization(?).
+    setKryoProperties(conf)
+    val sc = new SparkContext(conf)
+
+    def myMapFunc(user: User): String = user.toString
+
+    println("Let's load the User file as a RDD[User], call toString() on each and collect the result")
+    val userRDD: RDD[User] = readParquetRDD[User](sc, parquetFiles._1.toString)
+    userRDD.map(myMapFunc).collect().foreach(println(_))
+    sc.stop()
   }
 
   /**
@@ -106,10 +118,10 @@ object ParquetAvroSparkExample {
    * Note2: This step is not neccesary if we one rely on relation operations of Spark SQL,
    * since these use Row objects that are always serializable.
    */
-  def setKryoProperties() {
-    System.setProperty("spark.kryo.registrator", "avrotest.SparkAvroKryoRegistrator")
-    System.setProperty("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
-    System.setProperty("spark.kryoserializer.buffer.mb", 4.toString)
-    System.setProperty("spark.kryo.referenceTracking", "false")
+  def setKryoProperties(conf: SparkConf) {
+    conf.set("spark.kryo.registrator", classOf[SparkAvroKryoRegistrator].getName)
+    conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+    conf.set("spark.kryoserializer.buffer.mb", 4.toString)
+    conf.set("spark.kryo.referenceTracking", "false")
   }
 }

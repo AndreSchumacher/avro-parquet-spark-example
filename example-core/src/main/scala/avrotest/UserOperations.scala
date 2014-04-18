@@ -21,25 +21,28 @@ import java.io.File
 
 import scala.util.Random
 
-import org.apache.hadoop.fs.Path
+import parquet.avro.{AvroReadSupport, AvroParquetWriter}
+import parquet.hadoop.ParquetInputFormat
 
-import org.apache.avro.file.{DataFileReader, DataFileWriter}
-import org.apache.avro.mapred.FsInput
-import org.apache.avro.specific.{SpecificRecord, SpecificDatumReader, SpecificDatumWriter}
-
-import parquet.avro.AvroParquetWriter
-
-import org.apache.spark.SparkContext._
-import org.apache.spark.sql.SQLContext
 import org.apache.hadoop.conf.Configuration
-import org.apache.spark.sql.catalyst.expressions.Row
-import org.apache.avro.generic.{GenericDatumReader, IndexedRecord}
+import org.apache.hadoop.fs.Path
+import org.apache.hadoop.mapred.JobConf
+
 import org.apache.avro.Schema
+import org.apache.avro.file.{DataFileReader, DataFileWriter}
+import org.apache.avro.generic.{GenericDatumReader, IndexedRecord}
+import org.apache.avro.mapred.FsInput
+import org.apache.avro.specific.{SpecificRecord, SpecificDatumWriter}
+
+import org.apache.spark.SparkContext
+import org.apache.spark.rdd.RDD
+import org.apache.spark.sql.SQLContext
 
 // our own class generated from user.avdl by Avro tools
 import avrotest.avro.{Message, User}
 
 // Implicits
+import org.apache.spark.SparkContext._
 import collection.JavaConversions._
 
 object UserOperations {
@@ -101,12 +104,12 @@ object UserOperations {
    * @return A list of pairs (user name, number of messages sent by that user)
    */
   def findNumberOfMessagesSent(sqc: SQLContext): Seq[(String, Int)] = {
-   sqc.sql("""
+    sqc.sql("""
         SELECT name, COUNT(recipient) FROM
           UserTable JOIN MessageTable ON UserTable.name = MessageTable.sender
             GROUP BY name ORDER BY name""")
-     .collect()
-     .map(row => (row.getString(0), row.getInt(1)))
+      .collect()
+      .map(row => (row.getString(0), row.getInt(1)))
   }
 
   /**
@@ -130,7 +133,7 @@ object UserOperations {
   /**
    * Counter the number of occurences of each word contained in a message in
    * the MessageTable and returns the result as a word->count Map.
-   * 
+   *
    * @param sqc he SQLContext to use
    * @return A Map that has the words as key and the count as value
    */
@@ -142,6 +145,25 @@ object UserOperations {
       .reduceByKey(_ + _)
       .collect()
       .toMap
+  }
+
+  /**
+   * Read in a parquet file containing Avro data and return the result as an RDD.
+   *
+   * @param sc The SparkContext to use
+   * @param parquetFile The Parquet input file assumed to contain Avro objects
+   * @return An RDD that contains the data of the file
+   */
+  def readParquetRDD[T <% SpecificRecord: Manifest](sc: SparkContext, parquetFile: String): RDD[T] = {
+    val jobConf= new JobConf(sc.hadoopConfiguration)
+    ParquetInputFormat.setReadSupportClass(jobConf, classOf[AvroReadSupport[T]])
+    sc.newAPIHadoopFile(
+      parquetFile,
+      classOf[ParquetInputFormat[T]],
+      classOf[Void],
+      manifest[T].runtimeClass.asInstanceOf[Class[T]],
+      jobConf)
+      .map(_._2.asInstanceOf[T])
   }
 
   /**

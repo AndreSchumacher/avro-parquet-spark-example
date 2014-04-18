@@ -249,3 +249,19 @@ sqc.sql("SELECT content from MessageTable")
 
 The previous example counts the number of times each word appears in
 any of the messages in the MessageTable.
+
+Importing Avro objects directly as RDD
+--------------------------------------
+
+It is also possible to make direct use of the code-generated Avro
+classes in Spark. This requires registering a special Kryo serializer
+for each of the generated classes. Look at the example code for how
+this is done. The data can then be directly manupulated via Spark's
+Scala API. For example:
+
+```Scala
+def myMapFunc(user: User): String = user.toString
+
+val userRDD: RDD[User] = readParquetRDD[User](sc, parquetFileName)
+userRDD.map(myMapFunc).collect().foreach(println(_))
+```

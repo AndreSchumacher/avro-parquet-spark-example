@@ -17,6 +17,8 @@
 
 package avrotest
 
+import scala.util.Random
+
 import org.scalatest.FunSuite
 import org.scalatest.BeforeAndAfterEach
 
@@ -30,7 +32,6 @@ import org.apache.spark.sql.catalyst.util._
 
 import avrotest.UserOperations._
 import avrotest.avro.{Message, User}
-import scala.util.Random
 
 // inspired by [[org.apache.spark.LocalSparkContext]]
 class UserTestSuite extends FunSuite with BeforeAndAfterEach {

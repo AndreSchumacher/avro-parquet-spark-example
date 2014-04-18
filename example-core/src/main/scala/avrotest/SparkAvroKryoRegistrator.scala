@@ -27,7 +27,7 @@ import it.unimi.dsi.fastutil.io.{FastByteArrayOutputStream, FastByteArrayInputSt
 
 import org.apache.spark.serializer.KryoRegistrator
 
-import avrotest.avro.User
+import avrotest.avro.{Message, User}
 
 // This file is based (and mostly copied from):
 // https://github.com/bigdatagenomics/adam/blob/master/adam-core/src/main/scala/org/bdgenomics/adam/serialization/ADAMKryoRegistrator.scala
@@ -73,5 +73,6 @@ class AvroSerializer[T <: SpecificRecord : ClassManifest] extends Serializer[T] 
 class SparkAvroKryoRegistrator extends KryoRegistrator {
   override def registerClasses(kryo: Kryo) {
     kryo.register(classOf[User], new AvroSerializer[User]())
+    kryo.register(classOf[Message], new AvroSerializer[Message]())
   }
 }
