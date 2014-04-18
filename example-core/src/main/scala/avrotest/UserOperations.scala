@@ -37,6 +37,7 @@ import org.apache.avro.specific.{SpecificRecord, SpecificDatumWriter}
 import org.apache.spark.SparkContext
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.SQLContext
+import scala.reflect.ClassTag
 
 // our own class generated from user.avdl by Avro tools
 import avrotest.avro.{Message, User}
@@ -60,8 +61,7 @@ object UserOperations {
     sqc.sql("SELECT age FROM UserTable WHERE name = \"" + name + "\"")
       .collect()
       .apply(0)
-      .apply(0)
-      .asInstanceOf[Int]
+      .getInt(0)
   }
 
   /**
@@ -75,8 +75,7 @@ object UserOperations {
     sqc.sql("SELECT favorite_color FROM UserTable WHERE name = \"" + name + "\"")
       .collect()
       .apply(0)
-      .apply(0)
-      .asInstanceOf[String]
+      .getString(0)
   }
 
   /**
@@ -154,14 +153,14 @@ object UserOperations {
    * @param parquetFile The Parquet input file assumed to contain Avro objects
    * @return An RDD that contains the data of the file
    */
-  def readParquetRDD[T <% SpecificRecord: Manifest](sc: SparkContext, parquetFile: String): RDD[T] = {
+  def readParquetRDD[T <% SpecificRecord](sc: SparkContext, parquetFile: String)(implicit tag: ClassTag[T]): RDD[T] = {
     val jobConf= new JobConf(sc.hadoopConfiguration)
     ParquetInputFormat.setReadSupportClass(jobConf, classOf[AvroReadSupport[T]])
     sc.newAPIHadoopFile(
       parquetFile,
       classOf[ParquetInputFormat[T]],
       classOf[Void],
-      manifest[T].runtimeClass.asInstanceOf[Class[T]],
+      tag.runtimeClass.asInstanceOf[Class[T]],
       jobConf)
       .map(_._2.asInstanceOf[T])
   }

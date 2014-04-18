@@ -17,6 +17,8 @@
 
 package avrotest
 
+import scala.reflect.ClassTag
+
 import org.apache.avro.io.{BinaryEncoder, EncoderFactory, DecoderFactory, BinaryDecoder}
 import org.apache.avro.specific.{SpecificDatumWriter, SpecificDatumReader, SpecificRecord}
 
@@ -41,9 +43,9 @@ case class InputStreamWithDecoder(size: Int) {
 
 // NOTE: This class is not thread-safe; however, Spark guarantees that only a single thread
 // will access it.
-class AvroSerializer[T <: SpecificRecord : ClassManifest] extends Serializer[T] {
-  val reader = new SpecificDatumReader[T](classManifest[T].erasure.asInstanceOf[Class[T]])
-  val writer = new SpecificDatumWriter[T](classManifest[T].erasure.asInstanceOf[Class[T]])
+class AvroSerializer[T <: SpecificRecord](implicit tag: ClassTag[T]) extends Serializer[T] {
+  val reader = new SpecificDatumReader[T](tag.runtimeClass.asInstanceOf[Class[T]])
+  val writer = new SpecificDatumWriter[T](tag.runtimeClass.asInstanceOf[Class[T]])
   var in = InputStreamWithDecoder(1024)
   val outstream = new FastByteArrayOutputStream()
   val encoder = EncoderFactory.get().directBinaryEncoder(outstream, null.asInstanceOf[BinaryEncoder])
