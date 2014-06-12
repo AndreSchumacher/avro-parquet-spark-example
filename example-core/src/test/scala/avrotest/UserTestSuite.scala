@@ -105,7 +105,7 @@ class UserTestSuite extends FunSuite with BeforeAndAfterEach {
   test("Number of messages") {
     val tmp = findNumberOfMessagesSent(sqc)
     assert(tmp(0)._1 === "User1")
-    assert(tmp(0)._2 === 12)
+    assert(tmp(0)._2.toInt === 12)
   }
 
   // Note: this test could fail because of a different random generator implementation

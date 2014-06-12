@@ -85,12 +85,12 @@ object UserOperations {
    * @param sqc The SQLContext to use
    * @return A map of colors to the number of its occurrences
    */
-  def findColorDistribution(sqc: SQLContext): Map[String, Int] = {
-    val result = new collection.mutable.HashMap[String, Int]()
+  def findColorDistribution(sqc: SQLContext): Map[String, Long] = {
+    val result = new collection.mutable.HashMap[String, Long]()
     val colorCounts = sqc.sql("SELECT favorite_color, COUNT(name) FROM UserTable GROUP BY favorite_color")
       .collect()
     for(row <- colorCounts) {
-      result += row.getString(0) -> row.getInt(1)
+      result += row.getString(0) -> row.getLong(1)
     }
     result.toMap
   }
@@ -102,13 +102,13 @@ object UserOperations {
    * @param sqc The SQLContext to use
    * @return A list of pairs (user name, number of messages sent by that user)
    */
-  def findNumberOfMessagesSent(sqc: SQLContext): Seq[(String, Int)] = {
+  def findNumberOfMessagesSent(sqc: SQLContext): Seq[(String, Long)] = {
     sqc.sql("""
         SELECT name, COUNT(recipient) FROM
           UserTable JOIN MessageTable ON UserTable.name = MessageTable.sender
             GROUP BY name ORDER BY name""")
       .collect()
-      .map(row => (row.getString(0), row.getInt(1)))
+      .map(row => (row.getString(0), row.getLong(1)))
   }
 
   /**
@@ -130,7 +130,7 @@ object UserOperations {
   }
 
   /**
-   * Counter the number of occurences of each word contained in a message in
+   * Counter the number of occurrences of each word contained in a message in
    * the MessageTable and returns the result as a word->count Map.
    *
    * @param sqc he SQLContext to use
