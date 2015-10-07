@@ -229,7 +229,7 @@ sql("""SELECT name, COUNT(recipient) FROM
 ```
 
 The last example will generate a list of pairs of usernames and
-counts, correponding to the number of messages that user has sent.
+counts, corresponding to the number of messages that user has sent.
 
 Mixing SQL and other Spark operations
 -------------------------------------
